@@ -116,10 +116,17 @@ class LoadedBackend:
 
 
 def load_backend(config, route):
+    import torch
+    if not torch.cuda.is_available():
+        raise BackendError("本地语音合成需要支持 CUDA 的 NVIDIA 显卡。")
+    from .memory_placement import load_adaptively
     with own_voice_stream():
-        return _load_owned_backend(config, route)
+        loaded, _ = load_adaptively(config["runtime"]["device"],
+            lambda mode, available: _load_owned_backend(config, route, mode, available),
+            prefer_ram=route.get("prefer_ram", False))
+        return loaded
 
-def _load_owned_backend(config, route):
+def _load_owned_backend(config, route, memory_mode, available):
     """Load only local weights, merge if required, then capture and warm up."""
     backend = route["backend"]
     if backend not in {"base_clone", "v4_custom"}:
@@ -133,29 +140,24 @@ def _load_owned_backend(config, route):
     import torch
     import qwen_tts
     import faster_qwen3_tts
-    from qwen_tts import Qwen3TTSModel
+    from .memory_placement import load_qwen
     from faster_qwen3_tts import FasterQwen3TTS
     from faster_qwen3_tts.predictor_graph import PredictorGraph
     from faster_qwen3_tts.talker_graph import TalkerGraph
     from .candidate_prefix_backend import PrefixFasterBackend
 
-    if not torch.cuda.is_available():
-        raise BackendError("CUDA is required for this backend")
     device = runtime["device"]
     free, total = torch.cuda.mem_get_info(device)
-    if free < 10 * 1024 ** 3:
-        raise BackendError("Less than 10 GiB of free GPU memory")
     started = time.perf_counter()
-    base = Qwen3TTSModel.from_pretrained(
-        models["base"], device_map=device, torch_dtype=torch.bfloat16,
-        attn_implementation=runtime["attention"], local_files_only=True,
-    )
+    base = load_qwen(models["base"], device, runtime["attention"], memory_mode, precomputed_reference=True)
     if base.model.tts_model_type != "base":
         raise BackendError("Configured base checkpoint is not a Base model")
     merge = _merge_custom_voice(base, models) if backend == "v4_custom" else None
     core = base.model
     core.eval()
     talker, talker_config = core.talker, core.config.talker_config
+    if memory_mode == "cpu_lookup" and talker.get_text_embeddings().weight.device.type != "cpu":
+        raise BackendError("Voice adapter merge changed the CPU text placement")
     sub = config["subtalker"]
     predictor = PredictorGraph(talker.code_predictor, talker.code_predictor.model.config,
                                talker_config.hidden_size, device=device, dtype=torch.bfloat16, **sub)
@@ -189,6 +191,7 @@ def _load_owned_backend(config, route):
         "actual_subtalker": actual_sub, "v4_merge": merge,
         "warmup_before_request_seed": True, "load_and_warmup_seconds": time.perf_counter() - started,
         "gpu_free_before_load": free, "gpu_total_bytes": total,
+        "memory_placement": memory_mode, "available_cuda_budget_bytes": available,
         "decoder": "direct_full_prefix_integer_crop",
         "timing_scope": "Observed execution includes token synchronization; not a production latency benchmark.",
     }

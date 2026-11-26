@@ -169,6 +169,8 @@ class TTSManager:
     def __init__(self, *, diagnostics_enabled=False):
         self.diagnostics_enabled = bool(diagnostics_enabled)
         self.model = None
+        self._multilingual_placement = None
+        self._prefer_multilingual_ram = False
         self.temperature = 0.9    # 稳定度：官方默认 0.9（研究确认 0.7 会压低情绪表现力）
         self.is_speaking = False
         self._stop_flag = threading.Event()
@@ -206,6 +208,8 @@ class TTSManager:
             validate_config(config)
             with self._model_lock:
                 self.model = None
+                self._multilingual_placement = None
+                self._prefer_multilingual_ram = False
                 self._primed = False
                 gc.collect()
                 import torch
@@ -338,12 +342,11 @@ class TTSManager:
                 self._primed = False
             prepare_multilingual_codec()
             import torch
-            from faster_qwen3_tts import FasterQwen3TTS
+            from voice.tts.memory_placement import load_multilingual
             print("[TTS] 加载 Qwen3-TTS 模型...")
-            model = FasterQwen3TTS.from_pretrained(
-                MODEL_DIR, device="cuda:0", dtype=torch.bfloat16,
-                backend="torch", quant="BF16",
-            )
+            model, placement = load_multilingual(
+                MODEL_DIR, precomputed_reference=Path(REF_AUDIO_PATH).suffix.lower() == ".safetensors",
+                prefer_ram=self._prefer_multilingual_ram)
             if not self.enabled:
                 del model
                 gc.collect()
@@ -351,6 +354,7 @@ class TTSManager:
                     torch.cuda.empty_cache()
                 raise RuntimeError("语音朗读已关闭，取消加载 TTS")
             self.model = model
+            self._multilingual_placement = placement
             print("[TTS] 模型加载完成")
 
     @property
@@ -366,6 +370,8 @@ class TTSManager:
             with self._model_lock:
                 model = self.model
                 self.model = None
+                self._multilingual_placement = None
+                self._prefer_multilingual_ram = False
                 self._primed = False
                 quality = self._quality_backend
                 self._quality_backend = None
@@ -388,18 +394,35 @@ class TTSManager:
             if self._quality_enabled:
                 self._ensure_quality_backend(self._quality_preset)
                 return
-            self._ensure_model()
             if self._primed:
                 return
-            warmup = getattr(self.model, "warmup", None)
-            if callable(warmup):
-                warmup(prefill_len=100)
-            # 走一次极短克隆，预建 voice prompt/cache，不输出到声卡。
-            for _audio, _sr, _info in self._synth_stream(
-                    "あ。", "Japanese", "落ち着いて短く。",
-                    max_new_tokens=24, chunk_size=6):
-                pass
-            self._primed = True
+            for first in (True, False):
+                try:
+                    # Discard the prompt/decoder warmup; it never reaches the player.
+                    for _audio, _sr, _info in self._synth_stream(
+                            "あ。", "Japanese", "落ち着いて短く。", max_new_tokens=24, chunk_size=6):
+                        pass
+                    self._primed = True
+                    return
+                except RuntimeError as error:
+                    from voice.tts.memory_placement import is_cuda_oom
+                    if not is_cuda_oom(error):
+                        raise
+                    retry = self._multilingual_memory_pressure()
+                    if not first or not retry:
+                        raise
+                import torch
+                gc.collect()
+                torch.cuda.empty_cache()
+
+    def _multilingual_memory_pressure(self):
+        with self._model_lock:
+            retry = self._multilingual_placement == "cuda"
+            self._prefer_multilingual_ram = True
+            self._multilingual_placement = None
+            self.model = None
+            self._primed = False
+            return retry
 
     def _detect_emotion(self, text):
         """从文本推断情绪（日文 instruct 最有效，v3 实测确认）
@@ -524,11 +547,16 @@ class TTSManager:
                 if not record['samples']:
                     raise RuntimeError('TTS分段未生成音频，已停止后续合成')
                 record['status'] = 'complete'
+                record['memory_placement'] = self._multilingual_placement
             except GeneratorExit:
                 record['status'] = 'cancelled'
                 raise
-            except Exception:
+            except Exception as error:
                 record['status'] = 'failed'
+                if isinstance(error, RuntimeError):
+                    from voice.tts.memory_placement import is_cuda_oom
+                    if is_cuda_oom(error):
+                        self._multilingual_memory_pressure()
                 raise
             finally:
                 if generator is not None and hasattr(generator, 'close'):
@@ -904,7 +932,10 @@ class TTSManager:
             try:
                 result = self.audio_replay.cached(playback_id)
                 if result is None:
-                    result = self.audio_replay.reconstruct(playback_id, stop)
+                    resident = self._quality_backend.resident_decoder() if self._quality_backend else None
+                    if resident is None and self.model is not None:
+                        resident = self.model.speech_tokenizer, Path(MODEL_DIR) / 'speech_tokenizer'
+                    result = self.audio_replay.reconstruct(playback_id, stop, resident=resident)
                 if result is None or stop.is_set() or not self.audio_replay.enabled: return
                 wave, rate = result
                 record = self.audio_replay.record(playback_id)

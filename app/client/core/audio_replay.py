@@ -78,6 +78,20 @@ def _write_json(file, value):
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', 'utf-8')
     os.replace(temporary, file)
 
+
+def _decoder_identity(tokenizer, directory):
+    model = tokenizer.model.decoder
+    files = [Path(directory) / 'model.safetensors', Path(directory) / 'config.json',
+             Path(inspect.getfile(type(model))), Path(inspect.getfile(type(tokenizer)))]
+    return {'path': _record_decoder_path(directory), 'dtype': str(next(model.parameters()).dtype),
+            'device': str(tokenizer.device), 'files': {_record_decoder_path(p):file_hash(p) for p in files}}
+
+
+def _same_decoder(left, right):
+    def files(info):
+        return sorted((Path(path).name, digest) for path, digest in info['files'].items())
+    return left['device'] == right['device'] and left['dtype'] == right['dtype'] and files(left) == files(right)
+
 class AudioReplayStore:
     def __init__(self, root=None, cache_limit=10):
         self.root = Path(root or os.environ.get('ASUKA_AUDIO_REPLAY_DIR') or PROJECT_ROOT / 'data/chat-audio')
@@ -189,7 +203,7 @@ class AudioReplayStore:
             file.touch()
             return wave, rate
 
-    def reconstruct(self, message_id, stop_event):
+    def reconstruct(self, message_id, stop_event, *, resident=None):
         """Return the whole verified original waveform before publishing any PCM."""
         import torch
         from qwen_tts import Qwen3TTSTokenizer
@@ -199,8 +213,19 @@ class AudioReplayStore:
         info = record['decoder']
         decoder_dir = _verified_decoder_directory(info)
         dtype = getattr(torch, info['dtype'].replace('torch.', ''))
-        tokenizer = Qwen3TTSTokenizer.from_pretrained(str(decoder_dir), device_map=info['device'],
-            torch_dtype=dtype, local_files_only=True)
+        tokenizer = None
+        if resident is not None:
+            try:
+                if _same_decoder(_decoder_identity(*resident), info):
+                    tokenizer = resident[0]
+            except OSError:
+                # A different, still-resident model can have unavailable source files.
+                pass
+        if tokenizer is None:
+            tokenizer = Qwen3TTSTokenizer.from_pretrained(str(decoder_dir), device_map='cpu',
+                                                         torch_dtype=dtype, local_files_only=True)
+            tokenizer.model.decoder.to(info['device'])
+            tokenizer.device = torch.device(info['device'])
         tokenizer.model.eval()
         parts = []
         file = self.root / 'records' / self.key(message_id) / 'codes.npz'
@@ -239,10 +264,7 @@ class GenerationRecording:
         handle = None
         try:
             model = tokenizer.model.decoder
-            files = [Path(model_directory) / 'model.safetensors', Path(model_directory) / 'config.json',
-                     Path(inspect.getfile(type(model))), Path(inspect.getfile(type(tokenizer)))]
-            identity = {'path': _record_decoder_path(model_directory), 'dtype': str(next(model.parameters()).dtype),
-                        'device': str(tokenizer.device), 'files': {_record_decoder_path(p):file_hash(p) for p in files}}
+            identity = _decoder_identity(tokenizer, model_directory)
             if self.decoder is not None and identity != self.decoder:
                 raise ValueError('同条音频的解码模型发生变化')
             self.decoder = identity

@@ -57,6 +57,7 @@ class QualityTTSBackend:
         self._closed = False
         self.results = {}     # segment_index -> ObservedStream.result()
         self._primed_routes = set()
+        self._prefer_ram = False
         self.warmup_results = {}
 
     # ---- lifecycle -----------------------------------------------------
@@ -100,7 +101,10 @@ class QualityTTSBackend:
                 old.close()
             self._backends.clear()
             self._primed_routes.clear()
-            self._backends[backend] = load_backend(self._config, {"backend": backend})
+            route = {"backend": backend}
+            if self._prefer_ram:
+                route["prefer_ram"] = True
+            self._backends[backend] = load_backend(self._config, route)
         return self._backends[backend]
 
     def _prompt(self, profile):
@@ -115,46 +119,78 @@ class QualityTTSBackend:
     def prime(self, preset_id):
         """Load and warm the backend required by this preset (idempotent)."""
         with self._lock:
-            self._check_open()
-            profile_id, profile = self._preset(preset_id)
-            loaded = self._loaded(profile)
-            prompt = self._prompt(profile) if profile['backend'] == 'base_clone' else None
-            if profile_id not in self._primed_routes:
-                # CUDA graph capture does not exercise the first real prefill
-                # and waveform decode. Do that once before declaring readiness.
-                route = {'backend':profile['backend'], 'mode':profile['mode'],
-                         'text':'はい、わかった。', 'language':QUALITY_LANGUAGE,
-                         'speaker':profile['speaker'],
-                         'actual_instruct':'自然に話す。' if profile['backend']=='v4_custom' else None}
-                if prompt is not None:
-                    route['reference']={'reference_id':profile['reference_id']}
-                observer = ObservedStream(loaded.faster, self._config, route, 20261110, prompt=prompt)
-                iterator = iter(observer); started=time.perf_counter()
+            for first in (True, False):
                 try:
-                    audio, rate, _ = next(iterator)
-                    if not len(audio) or rate != 24000:
-                        raise QualityTTSError('Quality warmup returned no usable PCM')
-                except StopIteration as error:
-                    raise QualityTTSError('Quality warmup returned no PCM') from error
-                finally:
-                    iterator.close()
-                # Warmup is discarded: no player, recording or user-message result.
-                self.warmup_results[profile_id]={'seconds':time.perf_counter()-started,
-                    'discarded_samples':len(audio),'recorded':False}
-                self._primed_routes.add(profile_id)
-            return {"preset_id": preset_id, "profile_id": profile_id,
-                    "backend": profile["backend"], "loaded": True}
+                    return self._prime_locked(preset_id)
+                except RuntimeError as error:
+                    from voice.tts.memory_placement import is_cuda_oom
+                    if not is_cuda_oom(error):
+                        raise
+                    retry = self._on_memory_pressure()
+                    if not first or not retry:
+                        raise
+                # The warmup PCM was never played. Release its frames before retry.
+                import gc
+                import torch
+                gc.collect()
+                torch.cuda.empty_cache()
+
+    def _prime_locked(self, preset_id):
+        self._check_open()
+        profile_id, profile = self._preset(preset_id)
+        loaded = self._loaded(profile)
+        prompt = self._prompt(profile) if profile['backend'] == 'base_clone' else None
+        if profile_id not in self._primed_routes:
+            # CUDA graph capture does not exercise the first real prefill
+            # and waveform decode. Do that once before declaring readiness.
+            route = {'backend':profile['backend'], 'mode':profile['mode'],
+                     'text':'はい、わかった。', 'language':QUALITY_LANGUAGE,
+                     'speaker':profile['speaker'],
+                     'actual_instruct':'自然に話す。' if profile['backend']=='v4_custom' else None}
+            if prompt is not None:
+                route['reference']={'reference_id':profile['reference_id']}
+            observer = ObservedStream(loaded.faster, self._config, route, 20261110, prompt=prompt)
+            iterator = iter(observer); started=time.perf_counter()
+            try:
+                audio, rate, _ = next(iterator)
+                if not len(audio) or rate != 24000:
+                    raise QualityTTSError('Quality warmup returned no usable PCM')
+            except StopIteration as error:
+                raise QualityTTSError('Quality warmup returned no PCM') from error
+            finally:
+                iterator.close()
+            # Warmup is discarded: no player, recording or user-message result.
+            self.warmup_results[profile_id]={'seconds':time.perf_counter()-started,
+                'discarded_samples':len(audio),'recorded':False}
+            self._primed_routes.add(profile_id)
+        return {"preset_id": preset_id, "profile_id": profile_id,
+                "backend": profile["backend"], "loaded": True}
 
     def close(self):
         """Drop the current resident backend and cached prompts; caller must hold the lock."""
         if self._closed:
             return
         self._closed = True
+        self._drop_models()
+
+    def _drop_models(self):
         for backend in self._backends.values():
             backend.close()
         self._backends.clear()
         self._prompts.clear()
         self._primed_routes.clear()
+
+    def _on_memory_pressure(self):
+        retry = any(b.identity.get("memory_placement") == "cuda" for b in self._backends.values())
+        self._prefer_ram = True
+        self._drop_models()
+        return retry
+
+    def resident_decoder(self):
+        if not self._backends:
+            return None
+        loaded = next(iter(self._backends.values()))
+        return loaded.replay_tokenizer, Path(self._config['models']['base']) / 'speech_tokenizer'
 
     # ---- streaming -----------------------------------------------------
     def stream_segments(self, segments, *, preset_id, language, instruct,
@@ -225,5 +261,11 @@ class QualityTTSBackend:
                         return
                 finally:
                     generator.close()
+        except RuntimeError as error:
+            from voice.tts.memory_placement import is_cuda_oom
+            if is_cuda_oom(error):
+                # A stream may already have reached the speaker. Never restart it.
+                self._on_memory_pressure()
+            raise
         finally:
             self._lock.release()

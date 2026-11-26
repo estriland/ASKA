@@ -16,6 +16,8 @@ npm.cmd ci --prefix app\brain --omit=dev
 
 也可以用 `app\.venv\Scripts\python.exe app\client\release_entry.py` 从命令行启动。源码默认提供中性文字聊天。
 
+本地朗读使用支持 BF16 的 NVIDIA CUDA 显卡。显存宽裕时使用全 GPU 推理，显存较紧时自动将文本查表放在系统内存中，声学模型和波形解码仍在显卡上运行。文字聊天可以独立使用。
+
 要重新生成便携版的程序文件，请使用该版随附的 Python 3.12.10 与 esbuild 0.25.12。从本仓库根目录运行以下命令，输出位置选一个新目录。
 
 ```powershell
