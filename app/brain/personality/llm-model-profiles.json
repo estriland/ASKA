@@ -1,0 +1,7 @@
+{
+  "schema": "asuka.llm-model-profiles/v1",
+  "profiles": {
+    "deepseek-v4-flash": {"id": "deepseek-flash.reply-r2", "contract": "asuka.llm-state/v1", "layout": "single_instructions", "reasoning_effort": "high", "max_output_tokens": 8192, "qualification": "candidate"},
+    "deepseek-v4-pro": {"id": "deepseek-pro.reply-r2", "contract": "asuka.llm-state/v1", "layout": "single_instructions", "reasoning_effort": "high", "max_output_tokens": 8192, "qualification": "candidate"}
+  }
+}

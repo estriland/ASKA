@@ -1,0 +1,8 @@
+{
+  "analysis_window": 1000000,
+  "reply_window": 1000000,
+  "trigger": 0.65,
+  "target": 0.4,
+  "output_reserve": 196608,
+  "image_reserve": 8192
+}

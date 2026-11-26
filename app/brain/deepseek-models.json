@@ -1,0 +1,7 @@
+[
+  {"id":"deepseek-v4-flash","name":"V4 Flash · 旧别名 → V4.1 Flash 1017","vision":true,"aliasOf":"deepseek-flash","servedModel":"DeepSeek-V4.1-Flash-1017","cost":{"input":0.30,"output":1.20,"cacheRead":0.006,"cacheWrite":0}},
+  {"id":"deepseek-v4-pro","name":"V4 Pro · 0813","vision":false,"servedModel":"DeepSeek-V4-Pro-0813","cost":{"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":0}},
+  {"id":"deepseek-v4-flash-vision-exp","name":"Flash Vision · 旧别名 → V4.1 Flash 1017","vision":true,"aliasOf":"deepseek-flash","servedModel":"DeepSeek-V4.1-Flash-1017","cost":{"input":0.30,"output":1.20,"cacheRead":0.006,"cacheWrite":0}},
+  {"id":"deepseek-v4.1-flash-expires-on-0910","name":"V4.1 Flash · 历史限时0910 / 当前可用性未确认","vision":true,"experimental":true},
+  {"id":"deepseek-flash","name":"Flash · 正式名称 / V4.1 Flash 1017","vision":true,"servedModel":"DeepSeek-V4.1-Flash-1017","cost":{"input":0.30,"output":1.20,"cacheRead":0.006,"cacheWrite":0}}
+]

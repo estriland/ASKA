@@ -1,0 +1,21 @@
+{
+  "name": "brain",
+  "version": "1.0.0",
+  "description": "",
+  "main": "agent-core.mjs",
+  "scripts": {
+    "start": "node agent-core.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "minisearch": "7.2.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  }
+}

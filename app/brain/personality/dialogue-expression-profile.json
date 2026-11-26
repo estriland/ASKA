@@ -1,0 +1,9 @@
+{
+  "schema": "asuka.dialogue-expression-runtime/1",
+  "version": "source-neutral-1",
+  "subject": "neutral",
+  "common": "",
+  "localization": "",
+  "languages": {"zh": "", "ja": ""},
+  "preferences": {"natural": "", "reduced": ""}
+}

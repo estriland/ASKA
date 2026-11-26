@@ -1,0 +1,13 @@
+{
+  "version": "0.3.2",
+  "source": "https://github.com/andimarafioti/faster-qwen3-tts",
+  "files": {
+    "__init__.py": "f6f09484a9fb77e68e8bcb9ccd079d7cbfc1db2c7584b55674f759dbc5486252",
+    "model.py": "8ffa4f39708c4d22e6707323cf102d128eff05595fe2229919cdb495fef612dc",
+    "streaming.py": "39a1420626c49b87f3cda486f5a3f0fb8a82238f9a052114970ada40d1959010",
+    "sampling.py": "d52f136cb5d985f532239cb3f74ce5e8b9bfd269080e99295f09ce5f87bac988",
+    "predictor_graph.py": "9f74155040fb6ac2381375331f76fb4efcd5b3c0761ebfc4977717223145cb76",
+    "talker_graph.py": "2e402ef29d80b076481ab55dc6d20f1c55cae56604b5c3540c24a13f674b3d73"
+  },
+  "observed_graph_sha256": "bca74cd3d14f899ca38a5d392aae289fcb83c56045391a1ff8bb3bba8b97b6f0"
+}

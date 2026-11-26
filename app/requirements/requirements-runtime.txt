@@ -1,0 +1,13 @@
+# 当前嵌入式 Python 运行环境基线（CUDA 版 torch 需按本机 CUDA 单独安装）
+PyQt6==6.11.0
+PyQt6-Frameless-Window==0.8.2; platform_system == "Windows"
+pywin32==312; platform_system == "Windows"
+Markdown==3.10.3
+matplotlib==3.11.1
+numpy==1.26.4
+sounddevice==0.5.5
+torch==2.8.0
+silero-vad==6.2.1
+onnxruntime==1.28.0
+faster-whisper==1.2.1
+faster-qwen3-tts==0.3.2

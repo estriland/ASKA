@@ -1,0 +1,10 @@
+{
+  "ordinary": {"source_index": 206, "delivery": "落ち着いた日常的な調子で、丁寧さを保ちながらも堅すぎない話し方。"},
+  "explain": {"source_index": 410, "delivery": "中性的で落ち着いた明瞭な説明口調で、一定のテンポを保つ。"},
+  "firm": {"source_index": 379, "delivery": "明瞭で歯切れよく、やや速めのテンポでまっすぐ言い切る。"},
+  "restrained": {"source_index": 141, "delivery": "語尾を短く切り、軽い苛立ちを含む直接的な、訂正するような口調。"},
+  "friendly": {"source_index": 211, "delivery": "親しみやすく明るい調子で、肩の力を抜いた話し方。"},
+  "gentle": {"source_index": 412, "delivery": "柔らかく穏やかな声で、ややゆっくりと話す。"},
+  "playful": {"source_index": 393, "delivery": "親しみやすく少し茶目っ気のある口語調で、自然な速さで話す。"},
+  "signature": {"source_index": 19, "delivery": "短く力を込めて言い、最後の語を伸ばして下げる。苛立ちを含んだ、少し大げさなからかい口調。"}
+}

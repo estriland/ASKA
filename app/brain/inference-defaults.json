@@ -1,0 +1,10 @@
+{
+  "light": {"model":"current","reasoning":"default","max_tokens":0,"context_window":262144,"temperature":null,"top_p":null,"timeout_seconds":90},
+  "analysis": {"model":"current","reasoning":"high","max_tokens":196608,"context_window":1000000,"temperature":null,"top_p":null,"timeout_seconds":1200},
+  "reply": {"model":"current","reasoning":"high","max_tokens":196608,"context_window":1000000,"temperature":null,"top_p":null,"timeout_seconds":1200},
+  "compression": {"reasoning":"high","max_tokens":65536,"timeout_seconds":1200,"trigger":0.65,"target":0.4,"image_reserve":8192},
+  "general_fast": {"reasoning":"default","max_tokens":0,"timeout_seconds":0,"temperature":null,"top_p":null},
+  "general_quality": {"reasoning":"default","max_tokens":0,"timeout_seconds":0,"temperature":null,"top_p":null},
+  "general_reply": {"reasoning":"default","max_tokens":0,"timeout_seconds":0,"temperature":null,"top_p":null},
+  "request": {"json_mode":"auto","web_search":false}
+}
