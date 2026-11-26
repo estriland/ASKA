@@ -1,8 +1,8 @@
 """The in-call screen and its optional, non-activating desktop caption window."""
-from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QGuiApplication, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ui.themes import colors
@@ -122,6 +122,117 @@ class DesktopCaptions(QFrame):
         super().mouseReleaseEvent(event)
 
 
+class CallControlTray(QWidget):
+    """Clip the sliding controls to a fixed slot so the live captions never jump."""
+
+    def __init__(self, content):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.panel = QWidget(self)
+        column = QVBoxLayout(self.panel)
+        column.setContentsMargins(0, 0, 0, 12)
+        column.setSpacing(2)
+        self.handle = QPushButton()
+        self.handle.setObjectName('callControlsHandle')
+        self.handle.setAccessibleName('展开通话控制')
+        self.handle.setFixedSize(88, 22)
+        self.handle.setCursor(Qt.CursorShape.PointingHandCursor)
+        grip = QFrame()
+        grip.setObjectName('callControlsGrip')
+        grip.setFixedSize(38, 3)
+        grip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        handle_layout = QHBoxLayout(self.handle)
+        handle_layout.setContentsMargins(0, 0, 0, 0)
+        handle_layout.addWidget(grip, alignment=Qt.AlignmentFlag.AlignCenter)
+        column.addWidget(self.handle, alignment=Qt.AlignmentFlag.AlignHCenter)
+        column.addWidget(content)
+
+        self._open_fraction = 1.0
+        self._keyboard = False
+        self._delay = QTimer(self, singleShot=True)
+        self._delay.timeout.connect(self._fold_if_idle)
+        self._slide = QVariantAnimation(self)
+        self._slide.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._slide.valueChanged.connect(self._position_panel)
+        self.handle.clicked.connect(self.reveal)
+        for widget in [self.panel, *self.panel.findChildren(QWidget)]:
+            widget.installEventFilter(self)
+
+    def sizeHint(self):
+        return self.panel.sizeHint()
+
+    def _position_panel(self, fraction):
+        self._open_fraction = float(fraction)
+        distance = max(0, self.height() - self.handle.height())
+        self.panel.setGeometry(0, round((1 - fraction) * distance), self.width(), self.height())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_panel(self._open_fraction)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._position_panel(1.0)
+        self._delay.start(900)
+
+    def hideEvent(self, event):
+        self._delay.stop()
+        self._slide.stop()
+        self._keyboard = False
+        super().hideEvent(event)
+
+    def _animate(self, target):
+        if self._slide.state() == QVariantAnimation.State.Running and self._slide.endValue() == target:
+            return
+        self._slide.stop()
+        if self._open_fraction != target:
+            start = self._open_fraction
+            self._slide.setStartValue(start)
+            self._slide.setEndValue(target)
+            self._slide.setDuration(max(1, round(180 * abs(start - target))))
+            self._slide.start()
+
+    def reveal(self):
+        self._delay.stop()
+        self._animate(1.0)
+
+    def _fold_if_idle(self):
+        if not self.isVisible() or self.panel.underMouse():
+            return
+        if QApplication.activePopupWidget() or QApplication.mouseButtons():
+            self._delay.start(350)
+            return
+        focus = QApplication.focusWidget()
+        if focus and self.panel.isAncestorOf(focus):
+            if self._keyboard:
+                return
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._animate(0.0)
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if watched is self.panel:
+            if kind == QEvent.Type.Enter:
+                self._keyboard = False
+                self.reveal()
+            elif kind == QEvent.Type.Leave:
+                self._delay.start(350)
+            elif kind == QEvent.Type.LayoutRequest:
+                self.updateGeometry()
+        if kind == QEvent.Type.FocusIn and event.reason() in (
+                Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason, Qt.FocusReason.ShortcutFocusReason):
+            self._keyboard = True
+            self.reveal()
+        elif kind == QEvent.Type.KeyPress:
+            self._keyboard = True
+            self.reveal()
+        elif kind == QEvent.Type.MouseButtonPress:
+            self._keyboard = False
+        elif kind == QEvent.Type.FocusOut and self.isVisible():
+            self._delay.start(350)
+        return super().eventFilter(watched, event)
+
+
 class VoiceCallPage(QFrame):
     def __init__(self, settings, avatar, user_avatar, background=None):
         super().__init__()
@@ -134,7 +245,7 @@ class VoiceCallPage(QFrame):
         self._caption_tail.setSingleShot(True)
         self._caption_tail.timeout.connect(self.clear_caption)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 20, 28, 24)
+        layout.setContentsMargins(28, 20, 28, 0)
         layout.setSpacing(12)
         title = QLabel('语音通话')
         title.setObjectName('voicePageTitle')
@@ -170,6 +281,10 @@ class VoiceCallPage(QFrame):
         captions.addStretch()
         layout.addLayout(captions)
         layout.addStretch(2)
+        control_body = QWidget()
+        control_rows = QVBoxLayout(control_body)
+        control_rows.setContentsMargins(0, 0, 0, 0)
+        control_rows.setSpacing(8)
         controls = QHBoxLayout()
         controls.addStretch()
         self.microphone = QPushButton('静音')
@@ -185,7 +300,7 @@ class VoiceCallPage(QFrame):
             button.setMinimumSize(104, 40)
             controls.addWidget(button)
         controls.addStretch()
-        layout.addLayout(controls)
+        control_rows.addLayout(controls)
         options = QHBoxLayout()
         options.addStretch()
         self.language = QComboBox()
@@ -211,7 +326,7 @@ class VoiceCallPage(QFrame):
         for widget in (self.language,self.speaker,self.floating):
             options.addWidget(widget)
         options.addStretch()
-        layout.addLayout(options)
+        control_rows.addLayout(options)
         self.desktop_options = QWidget()
         appearance = QHBoxLayout(self.desktop_options)
         appearance.setContentsMargins(0, 0, 0, 0)
@@ -230,8 +345,10 @@ class VoiceCallPage(QFrame):
             appearance.addWidget(spin)
         appearance.addWidget(self.move_subtitle)
         appearance.addStretch()
-        layout.addWidget(self.desktop_options)
+        control_rows.addWidget(self.desktop_options)
         self.desktop_options.setVisible(self.floating.isChecked())
+        self.controls = CallControlTray(control_body)
+        layout.addWidget(self.controls)
         self.apply_theme()
 
     def set_artwork(self,file):
@@ -285,6 +402,9 @@ class VoiceCallPage(QFrame):
             f'QLabel#voiceCallStatus {{ color:{p["muted"]};background:transparent;padding:2px 8px; }}'
             f'QLabel#callParticipant {{color:{p["text"]};font-size:23px;font-weight:650;}}'
             f'QLabel#voicePageTitle {{ color:{p["text"]}; font-size:20px; font-weight:650; }}'
+            'QPushButton#callControlsHandle { background:transparent; border:0; padding:0; }'
+            f'QPushButton#callControlsHandle:focus {{ border:1px solid {p["border"]}; border-radius:8px; }}'
+            f'QFrame#callControlsGrip {{ background:{p["muted"]}; border:0; border-radius:1px; }}'
             f'QPushButton#callMicControl,QPushButton#callStopAudio {{ color:{p["text"]}; background:{p["field"]}; '
             f'border:1px solid {p["border"]}; border-radius:20px; }}'
             'QPushButton#callHangupControl { background:#a13950; color:white; border:1px solid #a13950; border-radius:20px; }'

@@ -2322,7 +2322,7 @@ class MainWindow(ThemedMainWindow):
         self.voice_call_panel.set_active(True)
         self.page_stack.setCurrentWidget(self.voice_call_panel)
         self._sync_sidebar()
-        self.panel_call_btn.setFocus()
+        self.voice_call_panel.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _end_live_call(self, reason='hangup'):
         if self.immediate_followup: self.immediate_followup.cancel(reason)
